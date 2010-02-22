@@ -36,13 +36,19 @@ class JAWS::Server with Plack::Component::Role {
 
             my $writer = $respond->([ 200, [ %$headers ]]);
 
-            my $done = Coro::rouse_cb;
-            $body_fh->on_error(sub { $writer->close; $done->(); });
-            $body_fh->on_eof(sub { $writer->close; $done->(); });
-            $body_fh->on_read(sub { $writer->write( delete $body_fh->{rbuf} ) });
+            eval {
+                my $done = Coro::rouse_cb;
+                $body_fh->on_error(sub { $writer->close; $done->(); });
+                $body_fh->on_eof(sub { $writer->close; $done->(); });
+                $body_fh->on_read(sub { $writer->write( delete $body_fh->{rbuf} ) });
 
-            Coro::rouse_wait($done);
-            $body_fh->destroy;
+                Coro::rouse_wait($done);
+                $body_fh->destroy;
+            };
+            if($@){
+                $writer->write("FAIL: $@");
+                return;
+            }
         };
     }
 }
