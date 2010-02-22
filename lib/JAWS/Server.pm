@@ -5,7 +5,6 @@ class JAWS::Server with Plack::Component::Role {
     use Coro;
     use AnyEvent::HTTP;
     use URI;
-    use DDS;
 
     method call(HashRef $env) {
         my $url = $env->{PATH_INFO};
@@ -21,6 +20,8 @@ class JAWS::Server with Plack::Component::Role {
             $k =~ tr/_/-/;
             lc $k => $env->{$_} }
           grep { /^HTTP/ } keys %$env;
+
+        $req_headers{host} = $uri->host;
 
         my $body_cb = Coro::rouse_cb;
         http_get "$uri", want_body_handle => 1, headers => \%req_headers, $body_cb;
