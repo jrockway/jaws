@@ -15,42 +15,35 @@ class JAWS::Server with Plack::Component::Role {
         my $uri = URI->new( $url );
         die "invalid URI" unless $uri->scheme eq 'http';
 
-        my %req_headers = map {
-            my $k = $_;
-            $k =~ s/^HTTP_//;
-            $k =~ tr/_/-/;
-            lc $k => $env->{$_} }
-          grep { /^HTTP/ } keys %$env;
-
-        $req_headers{host} = $uri->host;
-
-        my $body_cb = Coro::rouse_cb;
-        http_get "$uri", want_body_handle => 1, headers => \%req_headers, $body_cb;
-
         return sub {
             my $respond = shift;
 
-            my ($body_fh, $headers) = Coro::rouse_wait($body_cb);
-            if($headers->{Status} >= 590){ # internal error
-                $respond->([ $headers->{Status}, [], [ $headers->{Reason} ] ]);
-                return;
-            }
+            my %req_headers = map {
+                my $k = $_;
+                $k =~ s/^HTTP_//;
+                $k =~ tr/_/-/;
+                lc $k => $env->{$_} }
+              grep { /^HTTP/ } keys %$env;
 
-            my $writer = $respond->([ 200, [ %$headers ]]);
+            $req_headers{host} = $uri->host;
 
-            eval {
-                my $done = Coro::rouse_cb;
-                $body_fh->on_error(sub { $writer->close; $done->(); });
-                $body_fh->on_eof(sub { $writer->close; $done->(); });
-                $body_fh->on_read(sub { $writer->write( delete $body_fh->{rbuf} ) });
+            my $writer;
+            http_get "$uri", headers => \%req_headers,
+              on_body => sub {
+                  my ($body, $headers) = @_;
 
-                Coro::rouse_wait($done);
-                $body_fh->destroy;
-            };
-            if($@){
-                $writer->write("FAIL: $@");
-                return;
-            }
+                  if ($headers->{Status} >= 590) { # internal error
+                      $respond->([ $headers->{Status}, [], [ $headers->{Reason} ] ]);
+                      return 0;
+                  }
+
+                  $writer ||= $respond->([ $headers->{Status}, [ %$headers ]]);
+                  $writer->write($body);
+                  return 1;
+              },
+              sub { $writer->close };
+
+            return;
         };
     }
 }
